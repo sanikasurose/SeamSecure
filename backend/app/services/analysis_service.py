@@ -114,7 +114,7 @@ def detect_urgency_language(text: str) -> Optional[RiskIndicator]:
     # Urgency patterns commonly found in phishing emails
     urgency_patterns = [
         r'\bact\s+now\b',
-        r'\burgent\b',
+        r'\burgent(ly)?\b',  # Match "urgent" or "urgently"
         r'\bimmediately\b',
         r'\bexpire[sd]?\b',
         r'\blimited\s+time\b',
@@ -131,6 +131,16 @@ def detect_urgency_language(text: str) -> Optional[RiskIndicator]:
         r'\bconfirm\s+(now|immediately|your)\b',
         r'\btime\s+sensitive\b',
         r'\brespond\s+(now|immediately|urgently)\b',
+        r'\bapply\s+now\b',  # Common in job scam phishing
+        r'\bclick\s+here\s+now\b',  # Classic phishing CTA
+        r'\bclick\s+(now|immediately|here)\b',
+        r'\blimited\s+(spots?|positions?|openings?)\b',
+        r'\b(act|apply|register|sign\s*up)\s+(fast|quick(ly)?|now|today)\b',
+        r'\brolling\s+basis\b',  # Creates false urgency
+        r'\bpositions?\s+(filling|fill)\s+(fast|quick(ly)?)\b',
+        r'\bdon\'?t\s+miss\b',
+        r'\blast\s+chance\b',
+        r'\bdeadline\s+(approaching|today|tomorrow)\b',
     ]
     
     for pattern in urgency_patterns:
@@ -149,7 +159,7 @@ def detect_sensitive_requests(text: str) -> Optional[RiskIndicator]:
     Detect requests for sensitive information.
     
     Looks for requests for passwords, SSN, credit card numbers,
-    bank details, login credentials, etc.
+    bank details, login credentials, compensation info, etc.
     
     Args:
         text: Combined text content from the email thread
@@ -176,6 +186,15 @@ def detect_sensitive_requests(text: str) -> Optional[RiskIndicator]:
         r'\b(mother\'?s?\s+)?maiden\s+name\b',
         r'\bsecurity\s+(question|answer)\b',
         r'\btax\s+(id|identification)\b',
+        # Job scam phishing patterns - requesting sensitive employment/financial info
+        r'\b(expected|desired|current)\s+compensation\b',
+        r'\bcompensation\s+(range|expectations?|requirements?)\b',
+        r'\bsalary\s+(range|expectations?|requirements?|history)\b',
+        r'\b(share|provide|send)\s+(your\s+)?(resume|cv)\b',
+        r'\bcurrent\s+employment\s+status\b',
+        r'\bemployment\s+(status|history)\b',
+        r'\bnotice\s+period\b',
+        r'\bavailability\s+to\s+start\b',
     ]
     
     for pattern in sensitive_patterns:
@@ -340,6 +359,97 @@ def detect_sender_anomalies(senders: list[str]) -> Optional[RiskIndicator]:
     return None
 
 
+def detect_company_impersonation(text: str, senders: list[str]) -> Optional[RiskIndicator]:
+    """
+    Detect when someone claims to represent a major company but uses a non-corporate email.
+    
+    This is a MAJOR phishing red flag - e.g., claiming to be from Tesla
+    but sending from a personal Gmail account.
+    
+    Args:
+        text: Combined text content from the email thread
+        senders: List of unique sender email addresses
+        
+    Returns:
+        RiskIndicator if impersonation detected, None otherwise
+    """
+    if not text or not senders:
+        return None
+    
+    text_lower = text.lower()
+    
+    # Major companies commonly impersonated in phishing
+    company_patterns = {
+        'tesla': ['tesla.com'],
+        'google': ['google.com', 'alphabet.com'],
+        'meta': ['meta.com', 'fb.com', 'facebook.com'],
+        'apple': ['apple.com'],
+        'amazon': ['amazon.com', 'aboutamazon.com'],
+        'microsoft': ['microsoft.com'],
+        'netflix': ['netflix.com'],
+        'paypal': ['paypal.com'],
+        'linkedin': ['linkedin.com'],
+        'uber': ['uber.com'],
+        'airbnb': ['airbnb.com'],
+        'stripe': ['stripe.com'],
+        'bank of america': ['bankofamerica.com', 'bofa.com'],
+        'wells fargo': ['wellsfargo.com'],
+        'chase': ['chase.com', 'jpmorganchase.com'],
+        'goldman sachs': ['gs.com', 'goldmansachs.com'],
+        'morgan stanley': ['morganstanley.com'],
+        'nvidia': ['nvidia.com'],
+        'openai': ['openai.com'],
+        'anthropic': ['anthropic.com'],
+    }
+    
+    # Patterns indicating someone is claiming to work at a company
+    claim_patterns = [
+        r'(i am|i\'m|this is).{0,30}(at|from|with|@)\s*{company}',
+        r'(talent|recruiting|hr|human resources).{0,20}(at|from|@)\s*{company}',
+        r'(specialist|manager|recruiter|coordinator).{0,20}(at|from|@)\s*{company}',
+        r'{company}\s*(is|are)\s*(hiring|recruiting|looking)',
+        r'(opportunity|position|role|job).{0,30}(at|with)\s*{company}',
+        r'(joining|join)\s*(the\s+)?{company}\s*(team)?',
+    ]
+    
+    # Get sender domains
+    sender_domains = []
+    for sender in senders:
+        if '@' in sender.lower():
+            sender_domains.append(sender.lower().split('@')[1])
+    
+    # Check if email claims to be from a major company
+    for company, legitimate_domains in company_patterns.items():
+        # Check if company is mentioned in context suggesting representation
+        company_mentioned = False
+        for pattern_template in claim_patterns:
+            pattern = pattern_template.replace('{company}', company)
+            if re.search(pattern, text_lower):
+                company_mentioned = True
+                break
+        
+        # Also check for simple mentions like "@ Tesla" or "at Tesla" in signatures
+        if not company_mentioned:
+            if re.search(rf'@\s*{company}\b', text_lower) or re.search(rf'\bat\s+{company}\b', text_lower):
+                company_mentioned = True
+        
+        if company_mentioned:
+            # Check if any sender domain matches legitimate company domains
+            is_legitimate = any(
+                domain in legitimate_domains 
+                for domain in sender_domains
+            )
+            
+            if not is_legitimate:
+                return RiskIndicator(
+                    type="sender_anomaly",
+                    description=f"Email claims to be from {company.title()} but sender address doesn't match official domain - likely impersonation",
+                    severity="high",
+                )
+    
+    return None
+
+
 # =============================================================================
 # RULE ORCHESTRATION
 # =============================================================================
@@ -363,6 +473,7 @@ def run_rule_checks(features: ExtractedFeatures) -> list[RiskIndicator]:
         detect_sensitive_requests(features.full_text),
         detect_external_links(features.links),
         detect_sender_anomalies(features.senders),
+        detect_company_impersonation(features.full_text, features.senders),
     ]
     
     # Filter out None values and return triggered indicators
