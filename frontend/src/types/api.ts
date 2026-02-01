@@ -7,10 +7,6 @@ export interface Email {
    * Full email body text analyzed by the backend.
    */
   body: string;
-
-  /**
-   * Optional ISO 8601 timestamp 
-   */
   timestamp?: string;
 }
 

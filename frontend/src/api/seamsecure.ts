@@ -3,13 +3,13 @@
 import { ThreadRequest, ThreadResponse } from "../types/api.ts";
 
 /**
- * The base URL where your FastAPI server is running locally.
+ * The base URL where the FastAPI server is running locally.
  * - React dev server: http://localhost:5173
  * - FastAPI server:   http://localhost:8000
  *
- * Keeping this as a constant makes it easy to change later (deploy/Docker).
+ * In production, this would be the deployed backend URL.
  */
-const BASE_URL = "http://127.0.0.1:8000";
+const BASE_URL = "http://localhost:8000";
 
 /**
  * Sends an email thread to SeamSecure for phishing/security analysis.
