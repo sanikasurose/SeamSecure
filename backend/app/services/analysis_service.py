@@ -11,6 +11,7 @@ from app.models.thread import (
     RiskIndicator,
     ExtractedFeatures,
 )
+from app.services.scoring import score_indicators, determine_risk_level
 
 
 # =============================================================================
@@ -358,69 +359,6 @@ def run_rule_checks(features: ExtractedFeatures) -> list[RiskIndicator]:
 
 
 # =============================================================================
-# RISK SCORING
-# =============================================================================
-
-# Severity score mapping
-SEVERITY_SCORES = {
-    "low": 0.1,
-    "medium": 0.2,
-    "high": 0.4,
-}
-
-
-def score_risk(indicators: list[RiskIndicator]) -> float:
-    """
-    Convert indicators into a numeric risk score.
-    
-    Scoring rules:
-    - low severity: +0.1
-    - medium severity: +0.2
-    - high severity: +0.4
-    - Score is capped at 1.0
-    
-    Args:
-        indicators: List of triggered RiskIndicator objects
-        
-    Returns:
-        Numeric risk score between 0.0 and 1.0
-    """
-    if not indicators:
-        return 0.0
-    
-    total_score = sum(
-        SEVERITY_SCORES.get(indicator.severity, 0.0)
-        for indicator in indicators
-    )
-    
-    # Cap at 1.0
-    return min(total_score, 1.0)
-
-
-def classify_risk_level(score: float) -> str:
-    """
-    Classify numeric risk score into categorical risk level.
-    
-    Thresholds:
-    - 0.0 to <0.3: 'safe'
-    - 0.3 to <0.6: 'suspicious'
-    - 0.6 to 1.0: 'high_risk'
-    
-    Args:
-        score: Numeric risk score (0.0 - 1.0)
-        
-    Returns:
-        Risk level string ('safe', 'suspicious', or 'high_risk')
-    """
-    if score < 0.3:
-        return "safe"
-    elif score < 0.6:
-        return "suspicious"
-    else:
-        return "high_risk"
-
-
-# =============================================================================
 # RESPONSE BUILDING
 # =============================================================================
 
@@ -510,11 +448,11 @@ def analyze_thread(request: ThreadRequest) -> ThreadResponse:
     # Step 2: Run all rule-based detection checks
     indicators = run_rule_checks(features)
     
-    # Step 3: Calculate numeric risk score
-    score = score_risk(indicators)
+    # Step 3: Calculate numeric risk score using the scoring module
+    score = score_indicators(indicators)
     
-    # Step 4: Classify into risk level
-    level = classify_risk_level(score)
+    # Step 4: Classify into risk level using the scoring module
+    level = determine_risk_level(score)
     
     # Step 5: Build human-readable summary
     summary = build_summary(indicators)

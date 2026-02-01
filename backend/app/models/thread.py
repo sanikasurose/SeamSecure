@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 
 
-class Email(BaseModel)
+class Email(BaseModel):
     """
     Represents a single email in a thread.
     
@@ -79,12 +79,12 @@ class ThreadResponse(BaseModel):
     Attributes:
         thread_id: Identifier of the analyzed thread
         risk_score: Numeric risk score (0.0 - 1.0)
-        risk_level: Categorical risk level ('safe', 'suspicious', 'high_risk')
+        risk_level: Categorical risk level ('safe', 'suspicious', 'dangerous')
         indicators: List of detected risk indicators
         summary: Human-readable summary of the analysis
     """
     thread_id: str
     risk_score: float  # 0.0 - 1.0
-    risk_level: str  # "safe", "suspicious", "high_risk"
+    risk_level: str  # "safe", "suspicious", "dangerous"
     indicators: list[RiskIndicator]
     summary: str
