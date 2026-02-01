@@ -3,7 +3,7 @@
 # Date: 2026-01-31
 
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional
+from typing import Optional, Any
 
 
 class Email(BaseModel):
@@ -26,6 +26,26 @@ class Email(BaseModel):
     timestamp: str
     body_text: str
     body_html: Optional[str] = None
+
+
+class GeminiAnalysis(BaseModel):
+    """
+    AI analysis results from Gemini for a single email.
+    
+    Attributes:
+        intent: Classified intent of the message
+        sentiment: Sentiment score from -1 (negative) to 1 (positive)
+        urgency: Urgency score from 0 (none) to 1 (extreme)
+        style_drift: Style consistency score from 0 (consistent) to 1 (significant change)
+        flagged_segments: List of suspicious content segments identified by AI
+        explanation: Plain-English summary of AI findings
+    """
+    intent: str  # "informational" | "transactional" | "action_request" | "high_risk"
+    sentiment: float  # -1 to 1
+    urgency: float  # 0 to 1
+    style_drift: float  # 0 to 1
+    flagged_segments: list[Any] = []  # [{text, reason, severity}, ...]
+    explanation: str = ""
 
 
 class ThreadRequest(BaseModel):
@@ -82,9 +102,11 @@ class ThreadResponse(BaseModel):
         risk_level: Categorical risk level ('safe', 'suspicious', 'dangerous')
         indicators: List of detected risk indicators
         summary: Human-readable summary of the analysis
+        api_version: API version that generated this response
     """
     thread_id: str
     risk_score: float  # 0.0 - 1.0
     risk_level: str  # "safe", "suspicious", "dangerous"
     indicators: list[RiskIndicator]
     summary: str
+    api_version: str  # For client compatibility checking

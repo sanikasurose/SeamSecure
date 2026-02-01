@@ -7,6 +7,7 @@ from app.models.thread import (
     ThreadResponse,
     RiskIndicator,
     ExtractedFeatures,
+    GeminiAnalysis,
 )
 
 __all__ = [
@@ -15,4 +16,5 @@ __all__ = [
     "ThreadResponse",
     "RiskIndicator",
     "ExtractedFeatures",
+    "GeminiAnalysis",
 ]

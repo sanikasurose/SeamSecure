@@ -1,8 +1,10 @@
 # Name: analysis_service.py
-# Description: Rule-based email thread analysis service for phishing detection
+# Description: Email thread analysis service combining rule-based and AI-powered detection
 # Date: 2026-01-31
 
 import re
+import logging
+import time
 from typing import Optional
 
 from app.models.thread import (
@@ -11,7 +13,16 @@ from app.models.thread import (
     RiskIndicator,
     ExtractedFeatures,
 )
+from app.core.config import API_VERSION
 from app.services.scoring import score_indicators, determine_risk_level
+from app.services.gemini_service import (
+    analyze_thread_with_gemini,
+    gemini_to_indicators,
+    is_gemini_available,
+)
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -367,10 +378,18 @@ _SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2}
 
 # Human-readable labels for indicator types
 _INDICATOR_TYPE_LABELS = {
+    # Rule-based indicators
     "urgency_language": "urgent or pressuring language",
     "sensitive_request": "requests for sensitive information",
     "external_links": "suspicious links",
     "sender_anomaly": "sender address anomalies",
+    # AI-powered indicators (Gemini)
+    "intent_drift": "suspicious intent change in conversation",
+    "sentiment_shift": "suspicious tone shift",
+    "style_anomaly": "writing style inconsistencies",
+    "ai_urgency_detected": "AI-detected urgency patterns",
+    "ai_high_risk": "AI-classified high-risk content",
+    "ai_flagged_content": "AI-flagged suspicious content",
 }
 
 
@@ -539,6 +558,7 @@ def build_response(
         risk_level=level,
         indicators=indicators,
         summary=summary,
+        api_version=API_VERSION,
     )
 
 
@@ -553,10 +573,12 @@ def analyze_thread(request: ThreadRequest) -> ThreadResponse:
     This is the main orchestrator function that:
     1. Extracts features from the thread
     2. Runs all rule-based checks
-    3. Scores the risk
-    4. Classifies the risk level
-    5. Builds a human-readable summary
-    6. Returns the complete response
+    3. Runs AI-powered Gemini analysis (if available)
+    4. Combines indicators from both sources
+    5. Scores the risk
+    6. Classifies the risk level
+    7. Builds a human-readable summary
+    8. Returns the complete response
     
     Args:
         request: ThreadRequest containing thread_id and list of emails
@@ -564,26 +586,102 @@ def analyze_thread(request: ThreadRequest) -> ThreadResponse:
     Returns:
         ThreadResponse with risk assessment, indicators, and summary
     """
-    # Step 1: Extract features from raw thread data
+    thread_id = request.thread_id
+    
+    # -------------------------------------------------------------------------
+    # STEP 1: Feature Extraction
+    # -------------------------------------------------------------------------
+    logger.info(f"[{thread_id}] STEP 1/4: Extracting features...")
+    step_start = time.perf_counter()
     features = extract_features(request)
+    logger.debug(
+        f"[{thread_id}] Features: {len(features.senders)} senders, "
+        f"{len(features.links)} links, {len(features.full_text)} chars"
+    )
     
-    # Step 2: Run all rule-based detection checks
-    indicators = run_rule_checks(features)
+    # -------------------------------------------------------------------------
+    # STEP 2: Rule-Based Analysis
+    # -------------------------------------------------------------------------
+    logger.info(f"[{thread_id}] STEP 2/4: Running rule-based checks...")
+    rule_start = time.perf_counter()
+    rule_indicators = run_rule_checks(features)
+    rule_elapsed = (time.perf_counter() - rule_start) * 1000
+    logger.info(
+        f"[{thread_id}] Rule-based: {len(rule_indicators)} indicators ({rule_elapsed:.0f}ms)"
+    )
     
-    # Step 3: Calculate numeric risk score using the scoring module
-    score = score_indicators(indicators)
+    # -------------------------------------------------------------------------
+    # STEP 3: Gemini AI Analysis
+    # -------------------------------------------------------------------------
+    ai_indicators = []
+    gemini_available = is_gemini_available()
     
-    # Step 4: Classify into risk level using the scoring module
+    if gemini_available and request.emails:
+        logger.info(f"[{thread_id}] STEP 3/4: Starting Gemini AI analysis...")
+        gemini_start = time.perf_counter()
+        
+        try:
+            gemini_analyses = analyze_thread_with_gemini(request.emails)
+            ai_indicators = gemini_to_indicators(gemini_analyses)
+            gemini_elapsed = (time.perf_counter() - gemini_start) * 1000
+            
+            if gemini_analyses:
+                logger.info(
+                    f"[{thread_id}] Gemini SUCCESS: {len(gemini_analyses)} emails analyzed, "
+                    f"{len(ai_indicators)} indicators ({gemini_elapsed:.0f}ms)"
+                )
+            else:
+                logger.warning(
+                    f"[{thread_id}] Gemini returned no results ({gemini_elapsed:.0f}ms)"
+                )
+        except Exception as e:
+            gemini_elapsed = (time.perf_counter() - gemini_start) * 1000
+            logger.warning(
+                f"[{thread_id}] Gemini FAILED: {e} ({gemini_elapsed:.0f}ms) - "
+                f"falling back to rule-based only"
+            )
+    elif not gemini_available:
+        logger.info(f"[{thread_id}] STEP 3/4: Gemini DISABLED - skipping AI analysis")
+    else:
+        logger.info(f"[{thread_id}] STEP 3/4: No emails to analyze - skipping Gemini")
+    
+    # -------------------------------------------------------------------------
+    # STEP 4: Combine, Score, and Build Response
+    # -------------------------------------------------------------------------
+    logger.info(f"[{thread_id}] STEP 4/4: Combining results and scoring...")
+    
+    # Combine indicators from both sources
+    # Deduplicate by type to avoid double-counting similar detections
+    all_indicators = rule_indicators.copy()
+    existing_types = {ind.type for ind in rule_indicators}
+    
+    for ai_ind in ai_indicators:
+        # Don't add AI urgency if rule-based already found urgency
+        if ai_ind.type == "ai_urgency_detected" and "urgency_language" in existing_types:
+            continue
+        all_indicators.append(ai_ind)
+    
+    # Calculate numeric risk score
+    score = score_indicators(all_indicators)
+    
+    # Classify into risk level
     level = determine_risk_level(score)
     
-    # Step 5: Generate human-readable explanation
-    summary = generate_summary(indicators, level)
+    # Generate human-readable summary
+    summary = generate_summary(all_indicators, level)
     
-    # Step 6: Assemble and return response
+    # Log completion
+    total_elapsed = (time.perf_counter() - step_start) * 1000
+    logger.info(
+        f"[{thread_id}] COMPLETE: {len(all_indicators)} total indicators, "
+        f"score={score:.2f}, level={level} ({total_elapsed:.0f}ms)"
+    )
+    
+    # Assemble and return response
     return build_response(
-        thread_id=request.thread_id,
+        thread_id=thread_id,
         score=score,
         level=level,
-        indicators=indicators,
+        indicators=all_indicators,
         summary=summary,
     )

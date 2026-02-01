@@ -1,6 +1,31 @@
-# SeamSecure API Contract v1.0.0
+# SeamSecure API Contract v1.1.0
 
-> **Status:** PRODUCTION — Backend implements rule-based threat analysis.
+> **Status:** PRODUCTION — Backend implements rule-based + AI-powered threat analysis.
+
+---
+
+## Versioning Policy
+
+This API follows **Semantic Versioning** (`MAJOR.MINOR.PATCH`):
+
+| Change Type | Version Bump | Backward Compatible |
+|-------------|--------------|---------------------|
+| Breaking schema changes | MAJOR | No |
+| New features/optional fields | MINOR | Yes |
+| Bug fixes/docs | PATCH | Yes |
+
+**Current Version:** `1.1.0`
+
+**Version History:**
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.1.0 | 2026-02-01 | Added Gemini AI analysis, `api_version` in responses, new AI indicator types |
+| 1.0.0 | 2026-01-31 | Initial release with rule-based analysis |
+
+**Client Compatibility:**
+- Responses include `api_version` field for version checking
+- New optional fields may be added in MINOR releases
+- Existing fields will not be removed or renamed without MAJOR bump
 
 ---
 
@@ -80,6 +105,7 @@ interface ThreadResponse {
   risk_level: RiskLevel;       // Categorical assessment
   indicators: RiskIndicator[]; // Detected risk signals
   summary: string;             // Human-readable explanation
+  api_version: string;         // API version (e.g., "1.1.0")
 }
 
 type RiskLevel = "safe" | "suspicious" | "dangerous";
@@ -90,11 +116,23 @@ interface RiskIndicator {
   severity: Severity;          // Impact level
 }
 
-type IndicatorType =
+// Rule-based indicators
+type RuleIndicatorType =
   | "urgency_language"    // Urgent/pressuring language detected
   | "sensitive_request"   // Requests for sensitive information
   | "external_links"      // Suspicious URLs detected
   | "sender_anomaly";     // Sender address anomalies
+
+// AI-powered indicators (when Gemini is enabled)
+type AIIndicatorType =
+  | "intent_drift"        // Thread intent changed suspiciously
+  | "ai_urgency_detected" // AI detected urgency patterns
+  | "style_anomaly"       // Writing style inconsistency
+  | "sentiment_shift"     // Suspicious sentiment change
+  | "ai_high_risk"        // AI classified as high-risk
+  | "ai_flagged_content"; // AI flagged specific content
+
+type IndicatorType = RuleIndicatorType | AIIndicatorType;
 
 type Severity = "low" | "medium" | "high";
 ```
@@ -128,7 +166,8 @@ type Severity = "low" | "medium" | "high";
       "severity": "high"
     }
   ],
-  "summary": "Warning: This email thread is potentially dangerous. 4 risk indicators were detected. Primary concern: Email contains links using IP addresses instead of domain names. Additional risks: sender address anomalies, requests for sensitive information, urgent or pressuring language. Do not click any links, download attachments, or provide personal information."
+  "summary": "Warning: This email thread is potentially dangerous. 4 risk indicators were detected. Primary concern: Email contains links using IP addresses instead of domain names. Additional risks: sender address anomalies, requests for sensitive information, urgent or pressuring language. Do not click any links, download attachments, or provide personal information.",
+  "api_version": "1.1.0"
 }
 ```
 
@@ -143,8 +182,11 @@ type Severity = "low" | "medium" | "high";
 | `indicators[].description` | `string` | Human-readable explanation of the specific risk |
 | `indicators[].severity` | `string` | `"low"`, `"medium"`, or `"high"` — use for visual emphasis in UI |
 | `summary` | `string` | Deterministic, human-readable explanation that varies by risk level |
+| `api_version` | `string` | API version that generated this response (for compatibility checks) |
 
 #### Indicator Types Reference
+
+**Rule-Based Indicators** (always available):
 
 | Type | Severity | Description |
 |------|----------|-------------|
@@ -152,6 +194,17 @@ type Severity = "low" | "medium" | "high";
 | `sensitive_request` | `high` | Detects requests for passwords, SSN, credit cards, bank details |
 | `external_links` | `medium` or `high` | Detects URL shorteners (medium), IP-based URLs (high), suspicious TLDs (medium) |
 | `sender_anomaly` | `low`, `medium`, or `high` | Detects unusual domains (low), multiple senders (medium), typosquatting (high) |
+
+**AI-Powered Indicators** (when Gemini analysis is enabled):
+
+| Type | Severity | Description |
+|------|----------|-------------|
+| `intent_drift` | `medium` or `high` | Thread started informational but shifted to action requests |
+| `ai_urgency_detected` | `medium` | AI detected high urgency language patterns |
+| `style_anomaly` | `medium` | Writing style inconsistent with earlier messages in thread |
+| `sentiment_shift` | `medium` | Suspicious shift from positive to negative/threatening tone |
+| `ai_high_risk` | `high` | AI classified message as high-risk based on content analysis |
+| `ai_flagged_content` | varies | AI flagged specific suspicious content segments |
 
 ---
 
@@ -274,11 +327,24 @@ export interface ThreadRequest {
 
 export type RiskLevel = 'safe' | 'suspicious' | 'dangerous';
 export type Severity = 'low' | 'medium' | 'high';
-export type IndicatorType =
+
+// Rule-based indicator types
+export type RuleIndicatorType =
   | 'urgency_language'
   | 'sensitive_request'
   | 'external_links'
   | 'sender_anomaly';
+
+// AI-powered indicator types (when Gemini is enabled)
+export type AIIndicatorType =
+  | 'intent_drift'
+  | 'ai_urgency_detected'
+  | 'style_anomaly'
+  | 'sentiment_shift'
+  | 'ai_high_risk'
+  | 'ai_flagged_content';
+
+export type IndicatorType = RuleIndicatorType | AIIndicatorType;
 
 export interface RiskIndicator {
   type: IndicatorType;
@@ -292,6 +358,7 @@ export interface ThreadResponse {
   risk_level: RiskLevel;
   indicators: RiskIndicator[];
   summary: string;
+  api_version: string;  // Added in v1.1.0
 }
 ```
 
@@ -330,7 +397,9 @@ The `risk_score` is calculated by summing the weights of all detected indicators
 | CORS configured for React dev servers | ✅ |
 | No breaking changes expected | ✅ |
 | Rule-based analysis implemented | ✅ |
+| AI-powered analysis implemented (v1.1.0) | ✅ |
 | Deterministic summaries implemented | ✅ |
+| API versioning in responses | ✅ |
 | Frontend can proceed independently | ✅ |
 
 ---
