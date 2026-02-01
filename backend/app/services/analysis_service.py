@@ -369,6 +369,55 @@ def run_rule_checks(features: ExtractedFeatures) -> list[RiskIndicator]:
     return [indicator for indicator in results if indicator is not None]
 
 
+def run_rule_checks_per_email(emails: list) -> list[RiskIndicator]:
+    """
+    Run rule-based checks on each email individually.
+    
+    This ensures suspicious content in one email isn't diluted by
+    safe content in other emails (like user's own replies).
+    
+    Args:
+        emails: List of Email objects
+        
+    Returns:
+        List of triggered RiskIndicator objects (deduplicated by type)
+    """
+    from app.models.thread import Email
+    
+    indicators = []
+    found_types = set()
+    
+    # URL regex pattern
+    url_pattern = re.compile(r'https?://[^\s<>"\')\]]+', re.IGNORECASE)
+    
+    for email in emails:
+        # Extract links from this specific email
+        links = url_pattern.findall(email.body_text)
+        if email.body_html:
+            links.extend(url_pattern.findall(email.body_html))
+        links = list(dict.fromkeys(links))  # Deduplicate
+        
+        # Check this email's body for urgency language
+        urgency = detect_urgency_language(email.body_text)
+        if urgency and urgency.type not in found_types:
+            indicators.append(urgency)
+            found_types.add(urgency.type)
+        
+        # Check for sensitive requests
+        sensitive = detect_sensitive_requests(email.body_text)
+        if sensitive and sensitive.type not in found_types:
+            indicators.append(sensitive)
+            found_types.add(sensitive.type)
+        
+        # Check links in this email
+        link_indicator = detect_external_links(links)
+        if link_indicator and link_indicator.type not in found_types:
+            indicators.append(link_indicator)
+            found_types.add(link_indicator.type)
+    
+    return indicators
+
+
 # =============================================================================
 # EXPLANATION GENERATION
 # =============================================================================
@@ -604,7 +653,19 @@ def analyze_thread(request: ThreadRequest) -> ThreadResponse:
     # -------------------------------------------------------------------------
     logger.info(f"[{thread_id}] STEP 2/4: Running rule-based checks...")
     rule_start = time.perf_counter()
+    
+    # Run checks on combined features (for sender anomalies, etc.)
     rule_indicators = run_rule_checks(features)
+    found_types = {ind.type for ind in rule_indicators}
+    
+    # Also run per-email checks to catch suspicious content that might be
+    # diluted when all emails are combined (e.g., user's safe reply)
+    per_email_indicators = run_rule_checks_per_email(request.emails)
+    for ind in per_email_indicators:
+        if ind.type not in found_types:
+            rule_indicators.append(ind)
+            found_types.add(ind.type)
+    
     rule_elapsed = (time.perf_counter() - rule_start) * 1000
     logger.info(
         f"[{thread_id}] Rule-based: {len(rule_indicators)} indicators ({rule_elapsed:.0f}ms)"

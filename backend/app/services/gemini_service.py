@@ -290,7 +290,7 @@ def gemini_to_indicators(analyses: list[GeminiAnalysis]) -> list[RiskIndicator]:
     Convert Gemini analysis results to RiskIndicator objects.
     
     This function examines the Gemini analysis and generates appropriate
-    risk indicators based on detected patterns.
+    risk indicators based on detected patterns across ALL emails in the thread.
     
     Args:
         analyses: List of GeminiAnalysis objects from the thread
@@ -303,65 +303,84 @@ def gemini_to_indicators(analyses: list[GeminiAnalysis]) -> list[RiskIndicator]:
     if not analyses:
         return indicators
     
+    # Track if we've added certain indicator types to avoid duplicates
+    added_types = set()
+    
     # Check for intent drift across the thread
     if len(analyses) >= 2:
         intents = [a.intent for a in analyses]
-        # If thread starts informational and ends with action_request or high_risk
-        if intents[0] == "informational" and intents[-1] in ("action_request", "high_risk"):
-            indicators.append(RiskIndicator(
-                type="intent_drift",
-                description="Thread shows intent drift from informational to action-requesting behavior",
-                severity="medium" if intents[-1] == "action_request" else "high",
-            ))
+        # Check if ANY transition goes from safe to suspicious
+        for i in range(len(intents) - 1):
+            if intents[i] == "informational" and intents[i + 1] in ("action_request", "high_risk"):
+                if "intent_drift" not in added_types:
+                    indicators.append(RiskIndicator(
+                        type="intent_drift",
+                        description="Thread shows intent drift from informational to action-requesting behavior",
+                        severity="medium" if intents[i + 1] == "action_request" else "high",
+                    ))
+                    added_types.add("intent_drift")
+                break
     
-    # Check for high urgency in latest messages
-    latest_analysis = analyses[-1]
-    if latest_analysis.urgency >= 0.7:
+    # Check for high urgency in ANY message (not just the latest)
+    max_urgency = max((a.urgency for a in analyses), default=0)
+    if max_urgency >= 0.7 and "ai_urgency_detected" not in added_types:
         indicators.append(RiskIndicator(
             type="ai_urgency_detected",
-            description="AI detected high urgency language patterns in the message",
-            severity="medium",
+            description="AI detected high urgency language patterns in the thread",
+            severity="high" if max_urgency >= 0.85 else "medium",
         ))
+        added_types.add("ai_urgency_detected")
     
-    # Check for style drift
-    if latest_analysis.style_drift >= 0.6:
+    # Check for style drift in ANY message
+    max_style_drift = max((a.style_drift for a in analyses), default=0)
+    if max_style_drift >= 0.6 and "style_anomaly" not in added_types:
         indicators.append(RiskIndicator(
             type="style_anomaly",
             description="AI detected significant writing style changes inconsistent with previous messages",
             severity="medium",
         ))
+        added_types.add("style_anomaly")
     
-    # Check for negative sentiment shift
-    if len(analyses) >= 2:
-        initial_sentiment = analyses[0].sentiment
-        final_sentiment = analyses[-1].sentiment
-        if initial_sentiment >= 0 and final_sentiment <= -0.5:
-            indicators.append(RiskIndicator(
-                type="sentiment_shift",
-                description="Thread shows suspicious shift from positive to negative/threatening tone",
-                severity="medium",
-            ))
+    # Check for negative sentiment in ANY external message
+    for analysis in analyses:
+        if analysis.sentiment <= -0.5:
+            if "sentiment_shift" not in added_types:
+                indicators.append(RiskIndicator(
+                    type="sentiment_shift",
+                    description="Thread contains messages with suspicious negative/threatening tone",
+                    severity="medium",
+                ))
+                added_types.add("sentiment_shift")
+            break
     
-    # Check for high-risk intent
-    if latest_analysis.intent == "high_risk":
+    # Check for high-risk intent in ANY message
+    high_risk_count = sum(1 for a in analyses if a.intent == "high_risk")
+    if high_risk_count > 0 and "ai_high_risk" not in added_types:
         indicators.append(RiskIndicator(
             type="ai_high_risk",
-            description="AI classified this message as high-risk based on content analysis",
+            description=f"AI classified {high_risk_count} message(s) as high-risk based on content analysis",
             severity="high",
         ))
+        added_types.add("ai_high_risk")
     
-    # Process flagged segments from Gemini
-    for segment in latest_analysis.flagged_segments:
-        if isinstance(segment, dict):
-            severity = segment.get("severity", "medium")
-            if severity not in ("low", "medium", "high"):
-                severity = "medium"
-            
-            indicators.append(RiskIndicator(
-                type="ai_flagged_content",
-                description=f"AI flagged suspicious content: {segment.get('reason', 'unspecified')}",
-                severity=severity,
-            ))
+    # Process flagged segments from ALL analyses
+    flagged_reasons = set()
+    for analysis in analyses:
+        for segment in analysis.flagged_segments:
+            if isinstance(segment, dict):
+                reason = segment.get('reason', 'unspecified')
+                # Avoid duplicate flagged content for same reason
+                if reason not in flagged_reasons:
+                    flagged_reasons.add(reason)
+                    severity = segment.get("severity", "medium")
+                    if severity not in ("low", "medium", "high"):
+                        severity = "medium"
+                    
+                    indicators.append(RiskIndicator(
+                        type="ai_flagged_content",
+                        description=f"AI flagged suspicious content: {reason}",
+                        severity=severity,
+                    ))
     
     return indicators
 
