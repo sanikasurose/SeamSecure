@@ -275,24 +275,18 @@ async def google_callback(
                 f"expires_in={tokens.get('expires_in', 'N/A')}s"
             )
             
-            # Return success response with session ID
-            # Frontend should store session_id and send it with requests
-            return {
-                "status": "success",
-                "message": "Authentication successful",
-                "session_id": session_id,  # <-- Use this for subsequent requests
-                "user": {
-                    "email": email,
-                    "name": name,
-                    "picture": userinfo.get("picture"),
-                },
-                "tokens": {
-                    "has_access_token": "access_token" in tokens,
-                    "has_refresh_token": "refresh_token" in tokens,
-                    "expires_in": tokens.get("expires_in"),
-                    "scope": tokens.get("scope"),
-                },
-            }
+            # Redirect to frontend with session_id and user info
+            # Frontend will read these from URL params and store them
+            frontend_url = "http://localhost:5173"
+            redirect_params = urlencode({
+                "session_id": session_id,
+                "email": email,
+                "name": name,
+            })
+            redirect_url = f"{frontend_url}?{redirect_params}"
+            
+            logger.info(f"[OAuth] Redirecting to frontend: {frontend_url}")
+            return RedirectResponse(url=redirect_url)
             
         except httpx.RequestError as e:
             logger.error(f"[OAuth] Network error during token exchange: {e}")
