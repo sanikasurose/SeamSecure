@@ -9,7 +9,7 @@ import { ThreadRequest, ThreadResponse } from "../types/api.ts";
  *
  * Keeping this as a constant makes it easy to change later (deploy/Docker).
  */
-const BASE_URL = "http://localhost:8000";
+const BASE_URL = "http://127.0.0.1:8000";
 
 /**
  * Sends an email thread to SeamSecure for phishing/security analysis.
