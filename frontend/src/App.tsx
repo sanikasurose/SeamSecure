@@ -1,66 +1,54 @@
-// React hook for managing component state
-import { useState } from "react";
-
-// API function to analyze email threads
-import { analyzeThread } from "./api/seamsecure";
-
-// Type definition for the thread analysis response
-import { ThreadResponse } from "./types/api";
-
-// UI components for displaying risk information
-import { RiskBadge } from "./components/RiskBadge";
-import { IndicatorList } from "./components/IndicatorList";
+import React, { useState } from 'react';
+import { analyzeThread } from './api/seamsecure';
+import { ThreadResponse } from './types/api';
 
 function App() {
-    // Hold the API response and loading state
-  const [result, setResult] = useState<ThreadResponse | null>(null);
-  
-    // Used to indicate if the analysis is in progress
-  const [loading, setLoading] = useState(false);
+const [threadText, setThreadText] = useState('');
+const [result, setResult] = useState<ThreadResponse | null>(null);
+const [loading, setLoading] = useState(false);
+const [error, setError] = useState<string | null>(null);
 
-  // Called when the usser clicks the button
-  const handleAnalyze = async () => {
-    setLoading(true);
-
-    try {
-        // Call the backend API to analyze a sample email thread
-      const res = await analyzeThread({
-        thread_id: "thread-001",
-        emails: [
-          {
-            sender: "support@amaz0n-secure.com",
-            recipient: "user@company.com",
-            subject: "Urgent: Account Issue",
-            body: "Click here immediately to verify your account.",
-          },
-        ],
-      });
-
-      // Save the response to state
-      setResult(res);
-    } finally {
-      setLoading(false);
-    }
+  const handleAnalyze = () => {
+    // For now, just log the input
+    console.log('Thread text:', threadText);
+    alert('Analyze clicked! (API coming next)');
   };
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 600 }}>
+    <div
+      style={{
+        padding: '2rem',
+        fontFamily: 'sans-serif',
+        maxWidth: '800px',
+        margin: '0 auto',
+      }}
+    >
       <h1>SeamSecure</h1>
+      <p>Paste an email thread below to analyze potential security risks.</p>
 
-      <button onClick={handleAnalyze} disabled={loading}>
-        {loading ? "Analyzing..." : "Analyze Thread"}
+      <textarea
+        value={threadText}
+        onChange={(e) => setThreadText(e.target.value)}
+        placeholder="Paste the full email thread here..."
+        rows={10}
+        style={{
+          width: '100%',
+          padding: '1rem',
+          fontSize: '1rem',
+          marginBottom: '1rem',
+        }}
+      />
+
+      <button
+        onClick={handleAnalyze}
+        style={{
+          padding: '0.75rem 1.5rem',
+          fontSize: '1rem',
+          cursor: 'pointer',
+        }}
+      >
+        Analyze Thread
       </button>
-
-      {result && (
-        <>
-          <h2>
-            Risk Level: <RiskBadge level={result.risk_level} />
-          </h2>
-          <p>Risk Score: {result.risk_score}</p>
-          <p>{result.summary}</p>
-          <IndicatorList indicators={result.indicators} />
-        </>
-      )}
     </div>
   );
 }
