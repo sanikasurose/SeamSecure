@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 
 
-class Email(BaseModel):
+class Email(BaseModel)
     """
     Represents a single email in a thread.
     
