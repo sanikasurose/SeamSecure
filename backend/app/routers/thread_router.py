@@ -1,8 +1,6 @@
-"""
-Router for email thread analysis endpoints.
-
-This module handles HTTP concerns and delegates business logic to the service layer.
-"""
+# Name: thread_router.py
+# Description: Router for email thread analysis endpoints
+# Date: 2026-01-31
 
 from fastapi import APIRouter
 
