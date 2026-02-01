@@ -13,3 +13,6 @@ frontend/build/
 
 # Editor
 .vscode/
+
+# API
+.env
