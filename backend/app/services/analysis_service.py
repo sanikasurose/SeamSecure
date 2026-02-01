@@ -359,36 +359,158 @@ def run_rule_checks(features: ExtractedFeatures) -> list[RiskIndicator]:
 
 
 # =============================================================================
-# RESPONSE BUILDING
+# EXPLANATION GENERATION
 # =============================================================================
 
-def build_summary(indicators: list[RiskIndicator]) -> str:
+# Severity ordering for prioritization (higher index = more severe)
+_SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2}
+
+# Human-readable labels for indicator types
+_INDICATOR_TYPE_LABELS = {
+    "urgency_language": "urgent or pressuring language",
+    "sensitive_request": "requests for sensitive information",
+    "external_links": "suspicious links",
+    "sender_anomaly": "sender address anomalies",
+}
+
+
+def _get_indicator_label(indicator_type: str) -> str:
     """
-    Generate a human-readable explanation of detected risks.
+    Get a human-readable label for an indicator type.
+    
+    Args:
+        indicator_type: The technical indicator type string
+        
+    Returns:
+        Human-readable label for the indicator type
+    """
+    return _INDICATOR_TYPE_LABELS.get(indicator_type, indicator_type.replace("_", " "))
+
+
+def _sort_indicators_by_severity(indicators: list[RiskIndicator]) -> list[RiskIndicator]:
+    """
+    Sort indicators by severity (highest first).
+    
+    Args:
+        indicators: List of RiskIndicator objects
+        
+    Returns:
+        New list sorted by severity descending, then by type for stability
+    """
+    return sorted(
+        indicators,
+        key=lambda i: (-_SEVERITY_ORDER.get(i.severity, 0), i.type)
+    )
+
+
+def _get_most_severe_indicators(indicators: list[RiskIndicator]) -> list[RiskIndicator]:
+    """
+    Get indicators with the highest severity level present.
+    
+    Args:
+        indicators: List of RiskIndicator objects
+        
+    Returns:
+        List of indicators matching the highest severity found
+    """
+    if not indicators:
+        return []
+    
+    sorted_indicators = _sort_indicators_by_severity(indicators)
+    highest_severity = sorted_indicators[0].severity
+    
+    return [i for i in sorted_indicators if i.severity == highest_severity]
+
+
+def generate_summary(indicators: list[RiskIndicator], risk_level: str) -> str:
+    """
+    Generate a deterministic, human-readable explanation of detected risks.
+    
+    The summary is template-based and varies based on:
+    - The risk level (safe, suspicious, dangerous)
+    - The number and severity of detected indicators
+    - The specific types of risks detected
     
     Args:
         indicators: List of triggered RiskIndicator objects
+        risk_level: Classified risk level ("safe", "suspicious", "dangerous")
         
     Returns:
-        Human-readable summary string
+        Human-readable summary string explaining the analysis results
     """
-    if not indicators:
-        return "No significant risk indicators were detected in this email thread."
+    # === SAFE LEVEL ===
+    if risk_level == "safe":
+        if not indicators:
+            return (
+                "This email thread appears to be safe. "
+                "No significant risk indicators were detected during analysis."
+            )
+        # Safe but with minor indicators (low severity only)
+        indicator_labels = [_get_indicator_label(i.type) for i in indicators]
+        if len(indicators) == 1:
+            return (
+                f"This email thread appears to be safe. "
+                f"A minor indicator was noted ({indicator_labels[0]}), "
+                f"but it does not suggest significant risk."
+            )
+        return (
+            f"This email thread appears to be safe. "
+            f"Minor indicators were noted ({', '.join(indicator_labels)}), "
+            f"but they do not suggest significant risk."
+        )
     
-    if len(indicators) == 1:
-        indicator = indicators[0]
-        return f"One risk indicator detected: {indicator.description}"
+    # === SUSPICIOUS LEVEL ===
+    if risk_level == "suspicious":
+        most_severe = _get_most_severe_indicators(indicators)
+        severe_labels = [_get_indicator_label(i.type) for i in most_severe]
+        
+        if len(indicators) == 1:
+            return (
+                f"This email thread is suspicious. "
+                f"Analysis detected {severe_labels[0]}. "
+                f"Review the content carefully before taking any action."
+            )
+        
+        # Multiple indicators
+        all_labels = [_get_indicator_label(i.type) for i in _sort_indicators_by_severity(indicators)]
+        return (
+            f"This email thread is suspicious. "
+            f"Analysis detected {len(indicators)} risk indicators, "
+            f"including {severe_labels[0]}. "
+            f"Concerns identified: {', '.join(all_labels)}. "
+            f"Exercise caution before clicking links or responding."
+        )
     
-    # Multiple indicators
-    summary_parts = [f"Multiple risk indicators detected ({len(indicators)} total):"]
-    for i, indicator in enumerate(indicators, 1):
-        summary_parts.append(f"{i}. {indicator.description}")
+    # === DANGEROUS LEVEL ===
+    if risk_level == "dangerous":
+        most_severe = _get_most_severe_indicators(indicators)
+        severe_labels = [_get_indicator_label(i.type) for i in most_severe]
+        high_severity_descriptions = [i.description for i in most_severe]
+        
+        if len(indicators) == 1:
+            return (
+                f"Warning: This email thread is potentially dangerous. "
+                f"{high_severity_descriptions[0]}. "
+                f"Do not click any links or provide personal information."
+            )
+        
+        # Multiple indicators with at least one high severity
+        all_labels = [_get_indicator_label(i.type) for i in _sort_indicators_by_severity(indicators)]
+        primary_concern = high_severity_descriptions[0]
+        
+        return (
+            f"Warning: This email thread is potentially dangerous. "
+            f"{len(indicators)} risk indicators were detected. "
+            f"Primary concern: {primary_concern}. "
+            f"Additional risks: {', '.join(all_labels[1:]) if len(all_labels) > 1 else 'none'}. "
+            f"Do not click any links, download attachments, or provide personal information."
+        )
     
-    summary_parts.append(
-        "Exercise caution before clicking any links or providing sensitive information."
+    # Fallback for unknown risk levels (should not occur)
+    return (
+        f"Analysis complete. {len(indicators)} indicator(s) detected. "
+        f"Risk level: {risk_level}."
     )
-    
-    return " ".join(summary_parts)
 
 
 def build_response(
@@ -454,8 +576,8 @@ def analyze_thread(request: ThreadRequest) -> ThreadResponse:
     # Step 4: Classify into risk level using the scoring module
     level = determine_risk_level(score)
     
-    # Step 5: Build human-readable summary
-    summary = build_summary(indicators)
+    # Step 5: Generate human-readable explanation
+    summary = generate_summary(indicators, level)
     
     # Step 6: Assemble and return response
     return build_response(
