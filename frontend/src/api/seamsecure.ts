@@ -1,6 +1,6 @@
 // frontend/src/api/seamsecure.ts
 
-import { ThreadRequest, ThreadResponse } from "../types/api";
+import { ThreadRequest, ThreadResponse } from "../types/api.ts";
 
 /**
  * The base URL where your FastAPI server is running locally.
